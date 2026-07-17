@@ -77,6 +77,35 @@ Reproduce:
 python analysis/h2o_analysis.py --model Qwen/Qwen2-0.5B --n 500
 ```
 
+Gold config: **recent-window ratio 0.5, KV budget 25%** (an even recency/heavy-hitter
+split wins at every budget; see `docs/findings/h2o-analysis.md`).
+
+---
+
+## All three blocks together
+
+The TIU is the last of the three live blocks. Composed in chip order — KVCE
+decompress → scores → **TIU** keep/evict → APA route — on Qwen2 (HellaSwag n=1000,
+gold config), Δ vs the FP16 full-cache baseline:
+
+| config | Qwen2-0.5B | Qwen2-1.5B |
+|---|---|---|
+| TIU evict (25% budget) | −0.016 | −0.034 |
+| KVCE (cq4+) | −0.015 | −0.003 |
+| APA | +0.001 | −0.002 |
+| **ALL 3 stacked** | **−0.033** | **−0.030** |
+| ALL 3 + graded value demotion | −0.023 | −0.029 |
+
+Stacking **75% cache eviction × 4-bit KV × ~all-INT8 attention** costs only ~3%
+acc_norm. Two findings (`docs/findings/all-three-blocks-integration.md`): per-token
+*key* demotion is incompatible with ChannelQuant's per-channel key path (keys stay
+uniform per-channel), but per-token *value* demotion — the "mixed-precision
+retention" payoff — recovers ~1pt by spending bits on heavy hitters.
+
+```sh
+python analysis/full_stack_integration.py --model Qwen/Qwen2-0.5B --n 1000 --frac 0.25 --recent_ratio 0.5
+```
+
 ---
 
 ## How this fits in LonghornSilicon
@@ -135,6 +164,8 @@ token-importance-unit/
 ## Roadmap
 
 - [x] Algorithm validated (H2O accumulated-mass on Qwen2; near-lossless to 25% budget)
+- [x] Gold config chosen (recent-ratio 0.5, 25% budget)
+- [x] All-3-blocks integration verified (TIU+KVCE+APA compose within ~3% of FP16)
 - [ ] RTL: accumulator + streaming top-k eviction datapath, closed-form FF count
 - [ ] Directed + replay testbenches (iverilog), bit-exact vs a Python reference
 - [ ] Yosys synth FF-count gate; LibreLane Sky130 sign-off (0 violations)

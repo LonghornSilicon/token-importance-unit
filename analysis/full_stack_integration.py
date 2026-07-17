@@ -62,28 +62,19 @@ def _kvce(key, value, tier):
     return _q_keys_per_channel(key, 4, CFG["G"], k_out), _q_per_token(value.float(), 4).to(value.dtype)
 
 
-def _kvce_graded(key, value, tier_id):
-    """Per-token mixed-precision KVCE. tier_id: [B,H,T] in {0:fp16,1:cq8,2:cq4,3:cq4+}.
-    Values quantized per-token at each token's bits; keys per-channel INT4 for cq4/cq4+
-    tokens, per-token INT8 for cq8, identity for fp16."""
-    B, H, T, D = key.shape
-    kf, vf = key.float(), value.float()
-    # values: per-token bits by tier
-    v_out = vf.clone()
+def _kvce_graded_values(value, tier_id):
+    """Per-token mixed-precision VALUES only. tier_id: [B,H,T] in {0:fp16,1:cq8,2:cq4,3:cq4+}.
+    Keys are NOT graded per-token: ChannelQuant compresses keys PER-CHANNEL over a token
+    group, so per-token key demotion degenerates to the per-token-key path that collapses
+    GQA accuracy (the failure ChannelQuant exists to avoid). Keys stay uniform per-channel."""
+    vf = value.float()
+    v_out = vf.clone()                       # fp16-tier values stay identity
     for tid, bits in [(1, 8), (2, 4), (3, 4)]:
         m = (tier_id == tid)
         if m.any():
             vq = _q_per_token(vf, bits)
             v_out = torch.where(m.unsqueeze(-1), vq, v_out)
-    # keys: cq4/cq4+ tokens -> per-token INT4 (approx; grouped scale collapses to token here),
-    # cq8 -> per-token INT8, fp16 -> identity
-    k_out = vf.clone()
-    for tid, bits in [(1, 8), (2, 4), (3, 4)]:
-        m = (tier_id == tid)
-        if m.any():
-            kq = _q_per_token(kf, bits)
-            k_out = torch.where(m.unsqueeze(-1), kq, k_out)
-    return k_out.to(key.dtype), v_out.to(value.dtype)
+    return v_out.to(value.dtype)
 
 
 # ---------- ACU: APA precision-controller routing + INT8 S.V ----------
@@ -127,7 +118,7 @@ def _tiu(A, causal, i, j):
         heavy.scatter_(-1, top.indices, top.values > float("-inf"))
     else:
         heavy = torch.zeros_like(A, dtype=torch.bool)
-    keep = recent | heavy
+    keep = (recent | heavy) & causal        # recent includes future (i-j<0<L); clip to causal
     over = (i + 1) > C
     keep = torch.where(over, keep, causal)
 
@@ -175,7 +166,8 @@ def full_attention(module, query, key, value, attention_mask,
 
     # --- KVCE on retained K,V ---
     if CFG["graded"] and tier_id is not None:
-        key, value = _kvce_graded(key, value, tier_id)
+        key, _ = _kvce(key, value, "cq4+")                 # keys: uniform per-channel
+        value = _kvce_graded_values(value, tier_id)         # values: per-token mixed precision
     else:
         key, value = _kvce(key, value, CFG["kvce"])
 
