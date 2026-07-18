@@ -5,9 +5,12 @@ inference accelerator — **block 3 of four** targeting TSMC 16nm FinFET (N16FFC
 tape-out. It decides, per cached token, whether to **keep, demote, or evict** its
 KV entry — so the KV cache stays within a fixed on-die budget as context grows.
 
-> **Status: analysis phase.** The retention algorithm (H2O accumulated-mass) is
-> validated on real Qwen2 traces (below). RTL, synthesis, and Sky130 sign-off are
-> the next milestones, following the pattern of
+> **Status: built and signed off.** The retention algorithm (H2O accumulated-mass)
+> is validated on real Qwen2 traces (below); the RTL is verified (29/29 directed,
+> 40/40 real-data replay) and signs off on Sky130 with **0 violations**; a
+> bit-accurate Python reference model is at parity (40/40 evictions), and the
+> compiler-facing ISA spec, reference model, and paper section are in `docs/isa/`,
+> `sw/reference_model/`, and `paper/`. Follows the pattern of
 > [`adaptive-precision-attention`](https://github.com/LonghornSilicon/adaptive-precision-attention)
 > (block 1) and [`kv-cache-engine`](https://github.com/LonghornSilicon/kv-cache-engine) (block 2).
 
@@ -155,10 +158,11 @@ token-importance-unit/
 ├── analysis/          # Python: H2O algorithm study, trace capture, test-vector gen
 │   ├── h2o_analysis.py                 # accuracy vs KV-budget sweep (this is the result above)
 │   └── h2o_qwen05b_n500.json           # measured curve
-├── rtl/               # SystemVerilog DUT + testbenches (next milestone)
-├── openlane/          # LibreLane Sky130 sign-off (next milestone)
-├── paper/             # block write-up
-└── docs/              # design notes, CI docs
+├── rtl/               # SystemVerilog DUT + testbenches (29/29 + 40/40) + golden trace
+├── openlane/          # LibreLane Sky130 sign-off (0 violations)
+├── sw/reference_model/# bit-accurate Python model, parity test, compiler entry point
+├── paper/             # block write-up (token_importance_unit.pdf)
+└── docs/              # ISA spec, tier handshake, sign-off, SW overview, findings
 ```
 
 ## Roadmap
@@ -168,11 +172,14 @@ token-importance-unit/
 - [x] All-3-blocks integration verified (TIU+KVCE+APA compose within ~3% of FP16)
 - [x] Deep analysis: long-ctx knee, per-head vs shared (keep per-head), accumulator width (10b)
 - [x] RTL: distributed-accumulator + serialized-argmin eviction datapath, closed-form FF count (95 FFs)
-- [x] Directed + randomized self-checking testbench (iverilog), 21/21 bit-exact
+- [x] Directed + randomized self-checking testbench (iverilog), 29/29 bit-exact
 - [x] **Sky130 sign-off: 0 violations** across all checks (DRC/LVS/antenna/setup/hold/slew/cap/fanout) — `docs/sky130_signoff.md`
 - [x] Replay testbench from real Qwen2 attention traces (`sim_realdata`, 40/40 evictions bit-exact)
 - [x] TIU→KVCE tier-signal handshake (`tier_keep`), verified with APA in the loop (`docs/tier_handshake.md`)
-- [ ] Paper section with hardware results
+- [x] Bit-accurate Python reference model at Python↔RTL parity (40/40 evictions on the golden trace) — `sw/reference_model/`
+- [x] Compiler-facing ISA / interface spec (`tiu-isa-0.1`) — `docs/isa/token_importance_unit_isa.pdf`
+- [x] Paper section with hardware results — `paper/token_importance_unit.pdf`
+- [x] Software / reference-model overview — `docs/sw_overview.pdf`
 
 ## References
 

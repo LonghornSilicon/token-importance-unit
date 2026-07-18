@@ -39,7 +39,7 @@ antenna, setup, hold, routing). Closing slew + fanout took four RTL/config lever
 
 ## Physical proxy: N_SLOTS = 4
 
-The **shipped RTL default is N_SLOTS = 8** (what the testbench verifies, 21/21
+The **shipped RTL default is N_SLOTS = 8** (what the testbench verifies, 29/29
 bit-exact). The physical run synthesizes an **N_SLOTS = 4 proxy** via
 `SYNTH_PARAMETERS`, exactly as the KV Cache Engine ships a `VECTOR_DIM = 8` proxy: it
 shrinks the argmin mux fanout and the clock tree so TritonCTS's clock-root fanout
