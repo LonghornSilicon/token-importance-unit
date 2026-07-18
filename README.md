@@ -170,8 +170,8 @@ token-importance-unit/
 - [x] RTL: distributed-accumulator + serialized-argmin eviction datapath, closed-form FF count (95 FFs)
 - [x] Directed + randomized self-checking testbench (iverilog), 21/21 bit-exact
 - [x] **Sky130 sign-off: 0 violations** across all checks (DRC/LVS/antenna/setup/hold/slew/cap/fanout) — `docs/sky130_signoff.md`
-- [ ] Replay testbench from real Qwen2 eviction traces
-- [ ] Integration: tier-signal handshake with the KV Cache Engine
+- [x] Replay testbench from real Qwen2 attention traces (`sim_realdata`, 40/40 evictions bit-exact)
+- [x] TIU→KVCE tier-signal handshake (`tier_keep`), verified with APA in the loop (`docs/tier_handshake.md`)
 - [ ] Paper section with hardware results
 
 ## References
