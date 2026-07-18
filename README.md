@@ -26,7 +26,7 @@ KV entry — so the KV cache stays within a fixed on-die budget as context grows
 | **Signal** | Post-softmax attention mass (the ACU sparsity study proved pre-softmax proxies fail at r≈0, post-softmax works at r≈0.99) |
 | **Integration** | Emits the **tier signal** that the KV Cache Engine already consumes (keep → CQ-8, demote → CQ-4, evict → drop) — mixed-precision retention |
 | **Verified (algorithm)** | HellaSwag acc_norm within **−0.006** of full cache down to **25% KV budget** on Qwen2-0.5B (n=500) |
-| **Status** | Analysis phase complete; RTL next |
+| **Status** | Built & signed off — RTL verified (29/29 directed, 40/40 real-data replay), **0-violation Sky130**, bit-exact Python reference at parity, ISA spec + paper shipped |
 
 ---
 
