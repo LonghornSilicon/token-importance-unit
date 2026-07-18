@@ -4,7 +4,8 @@
 **Date:** 2026-07-17.
 **One-line:** Stacking Token Importance Unit eviction (25% KV budget) + ChannelQuant
 4-bit KV + APA ~all-INT8 attention on Qwen2 costs only ~3% HellaSwag acc_norm vs FP16;
-graded value demotion recovers ~1pt on the 0.5B model.
+graded value demotion recovers ~1pt on the 0.5B model — at a memory cost (~5.9 vs 4.0
+b/val), not free; sub-4-bit demotion to offset it craters (see `graded-value-2bit.md`).
 
 ---
 
@@ -42,11 +43,17 @@ optimizations (75% cache eviction × 4-bit KV × INT8 compute). APA remains free
    Measured: graded-keys drove the stack to −0.17. **Keys must stay uniform
    per-channel; only VALUES (which are already per-token) can be graded.**
 
-2. **Graded VALUE demotion helps.** Mapping token importance → value precision
-   (top 10% FP16 / top 25% CQ-8 / next CQ-4 / rest CQ-4+) on the retained set beats
-   uniform CQ-4+ by ~+0.010 on Qwen2-0.5B (−0.023 vs −0.033), neutral on 1.5B. This
-   is the concrete payoff of the "mixed-precision retention" framing: spend bits on
-   the heavy hitters, starve the rest.
+2. **Graded VALUE demotion helps — but it's a memory *tax*, not free.** Mapping token
+   importance → value precision (top 10% FP16 / top 25% CQ-8 / next CQ-4 / rest CQ-4+)
+   beats uniform CQ-4+ by ~+0.010 on Qwen2-0.5B (−0.023 vs −0.033), neutral on 1.5B.
+   **Correction to an earlier "starve the rest" framing:** the ladder only *promotes*
+   above 4-bit and never demotes below, so its average is **~5.9 vs 4.0 b/val** — the
+   +1pt is bought with ~47% more value memory. Making it memory-neutral by 2-bitting
+   low-importance tokens does NOT work with the current codec: uniform-INT2 craters
+   (−0.09/−0.28) and a memory-neutral 2-bit-floor ladder is a wash on 0.5B and −0.065
+   on 1.5B — the down-weighting doesn't rescue naive sub-4-bit
+   (`graded-value-2bit.md`). A grouped-INT2 + residual-window codec (KIVI-style) might,
+   but that needs a real 2-bit RTL tier (absent today).
 
 ## Implication for the TIU↔KVCE interface
 

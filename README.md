@@ -103,7 +103,11 @@ Stacking **75% cache eviction × 4-bit KV × ~all-INT8 attention** costs only ~3
 acc_norm. Two findings (`docs/findings/all-three-blocks-integration.md`): per-token
 *key* demotion is incompatible with ChannelQuant's per-channel key path (keys stay
 uniform per-channel), but per-token *value* demotion — the "mixed-precision
-retention" payoff — recovers ~1pt by spending bits on heavy hitters.
+retention" lever — recovers ~1pt on 0.5B, but at a **memory cost** (~5.9 vs 4.0
+b/val): the ladder only promotes above 4-bit, never below. Trying to make it
+memory-neutral by demoting boring tokens to 2-bit craters accuracy with the current
+codec (`docs/findings/graded-value-2bit.md`) — so graded is a memory/accuracy trade,
+not a free win.
 
 ```sh
 python analysis/full_stack_integration.py --model Qwen/Qwen2-0.5B --n 1000 --frac 0.25 --recent_ratio 0.5
