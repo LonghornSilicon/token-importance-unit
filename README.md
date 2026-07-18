@@ -167,10 +167,9 @@ token-importance-unit/
 - [x] Gold config chosen (recent-ratio 0.5, 25% budget)
 - [x] All-3-blocks integration verified (TIU+KVCE+APA compose within ~3% of FP16)
 - [x] Deep analysis: long-ctx knee, per-head vs shared (keep per-head), accumulator width (10b)
-- [x] RTL: accumulator + serialized-argmin eviction datapath, closed-form FF count (113 FFs)
-- [x] Directed + randomized self-checking testbench (iverilog), 20/20 bit-exact
-- [x] Yosys synth FF-count + Sky130 first pass: DRC/LVS/antenna/timing clean (`docs/sky130_signoff.md`)
-- [ ] Close residual max-slew (pipeline the argmin compare to cut mux fanout) → 0-violation sign-off
+- [x] RTL: distributed-accumulator + serialized-argmin eviction datapath, closed-form FF count (95 FFs)
+- [x] Directed + randomized self-checking testbench (iverilog), 21/21 bit-exact
+- [x] **Sky130 sign-off: 0 violations** across all checks (DRC/LVS/antenna/setup/hold/slew/cap/fanout) — `docs/sky130_signoff.md`
 - [ ] Replay testbench from real Qwen2 eviction traces
 - [ ] Integration: tier-signal handshake with the KV Cache Engine
 - [ ] Paper section with hardware results

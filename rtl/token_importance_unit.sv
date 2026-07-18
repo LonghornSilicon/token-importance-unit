@@ -28,12 +28,13 @@
 //   evict_slot     : SLOT_WIDTH
 //   Total: N_SLOTS*(SCORE_WIDTH+1) + SCORE_WIDTH + 3*SLOT_WIDTH + 3
 //
-// For N_SLOTS = 8, SCORE_WIDTH = 10, SLOT_WIDTH = 3:
-//   8*11 + 10 + 3*3 + 3 = 88 + 10 + 9 + 3 = 110 FFs (register-count derivation)
+// For N_SLOTS = 8, SCORE_WIDTH = 8, SLOT_WIDTH = 3:
+//   8*9 + 8 + 3*3 + 3 = 72 + 8 + 9 + 3 = 92 FFs (register-count derivation)
 //
-// SCORE_WIDTH = 10 is set from the accumulator-bit-width study
-// (docs/findings/h2o-deep-analysis.md): 8 bits is already loss-free for the
-// eviction ranking on Qwen2 (-0.002 acc_norm), 10 gives margin at trivial cost.
+// SCORE_WIDTH = 8 is set from the accumulator-bit-width study
+// (docs/findings/h2o-deep-analysis.md): 8 bits is loss-free for the eviction
+// ranking on Qwen2 (-0.002 acc_norm). Fewer score bits also shrink the argmin
+// read-mux, which is what drove the Sky130 max-transition closure.
 // The CI FF-count gate pins the synthesized value; the derivation is the analytic
 // bound it tracks (yosys keeps a few slot-index FFs un-merged, ~+3).
 //
@@ -41,7 +42,7 @@
 
 module token_importance_unit #(
     parameter  integer N_SLOTS      = 8,
-    parameter  integer SCORE_WIDTH  = 10,
+    parameter  integer SCORE_WIDTH  = 8,
     parameter  integer WEIGHT_WIDTH = 8,
     localparam integer SLOT_WIDTH   = (N_SLOTS <= 1) ? 1 : $clog2(N_SLOTS)
 ) (
@@ -82,11 +83,20 @@ module token_importance_unit #(
 
     assign busy = (state != S_IDLE);
 
-    // Saturating add for the accumulate path
-    wire [SCORE_WIDTH:0] sum_ext = {1'b0, score[acc_slot]} +
-                                   {{(SCORE_WIDTH-WEIGHT_WIDTH+1){1'b0}}, acc_weight};
-    wire [SCORE_WIDTH-1:0] sum_sat = sum_ext[SCORE_WIDTH] ? SCORE_MAX
-                                                          : sum_ext[SCORE_WIDTH-1:0];
+    // Saturating add — instantiated PER SLOT below (distributed accumulators). There
+    // is deliberately no shared sum result broadcast to all slots: a single adder
+    // output feeding N_SLOTS register-input muxes was the high-fanout net that blew
+    // max-transition in Sky130. Each slot owns its adder (a tiny WEIGHT_WIDTH add),
+    // driven only by its own score and the broadcast acc_weight (easy to buffer).
+    function [SCORE_WIDTH-1:0] sat_add;
+        input [SCORE_WIDTH-1:0] s;
+        input [WEIGHT_WIDTH-1:0] w;
+        reg [SCORE_WIDTH:0] ext;
+        begin
+            ext = {1'b0, s} + {{(SCORE_WIDTH-WEIGHT_WIDTH+1){1'b0}}, w};
+            sat_add = ext[SCORE_WIDTH] ? SCORE_MAX : ext[SCORE_WIDTH-1:0];
+        end
+    endfunction
 
     integer k;
     always @(posedge clk) begin
@@ -106,11 +116,17 @@ module token_importance_unit #(
             evict_valid <= 1'b0;
             case (state)
                 S_IDLE: begin
-                    // ACC and LOAD can happen the same cycle (different slots typical)
-                    if (acc_valid) score[acc_slot] <= sum_sat;
-                    if (ld_valid) begin
-                        score[ld_slot] <= {SCORE_WIDTH{1'b0}};
-                        valid[ld_slot] <= 1'b1;
+                    // Distributed per-slot update: each slot owns its adder, so no
+                    // shared result fans out across the register file. LOAD (zero +
+                    // set valid) has priority over ACC on the same slot, matching the
+                    // original last-write-wins ordering.
+                    for (k = 0; k < N_SLOTS; k = k + 1) begin
+                        if (ld_valid && (ld_slot == k[SLOT_WIDTH-1:0])) begin
+                            score[k] <= {SCORE_WIDTH{1'b0}};
+                            valid[k] <= 1'b1;
+                        end else if (acc_valid && (acc_slot == k[SLOT_WIDTH-1:0])) begin
+                            score[k] <= sat_add(score[k], acc_weight);
+                        end
                     end
                     if (evict_req) begin
                         state     <= S_SCAN;
