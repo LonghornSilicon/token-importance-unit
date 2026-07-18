@@ -63,6 +63,17 @@ module token_importance_unit #(
     output reg                           evict_valid,
     output reg  [SLOT_WIDTH-1:0]         evict_slot,
 
+    // TIER HANDSHAKE to the KV Cache Engine (block 2).
+    // Per-slot importance tier, driven combinationally from the accumulated mass:
+    //   tier_keep[k] = 1  -> heavy hitter: KVCE keeps its VALUE at high precision (CQ-8)
+    //   tier_keep[k] = 0  -> demote:       KVCE stores its VALUE at CQ-4
+    // Eviction (dropping K+V) is signalled separately via evict_slot above.
+    // NB: the tier is a per-token VALUE-precision lever only — keys stay uniform
+    // per-channel (per-token key demotion collapses GQA; see docs). Emitted as N
+    // parallel comparators (no read-mux) so it adds no fanout to the argmin path.
+    input  wire [SCORE_WIDTH-1:0]        tier_threshold,
+    output wire [N_SLOTS-1:0]            tier_keep,
+
     output wire                          busy
 );
     localparam [SCORE_WIDTH-1:0] SCORE_MAX = {SCORE_WIDTH{1'b1}};
@@ -82,6 +93,15 @@ module token_importance_unit #(
     reg [SLOT_WIDTH-1:0]  min_idx;
 
     assign busy = (state != S_IDLE);
+
+    // Per-slot importance tier: parallel comparators, one per slot (no read-mux, so
+    // no added fanout on score[]). A valid slot at/above the threshold is a KEEP.
+    genvar gi;
+    generate
+        for (gi = 0; gi < N_SLOTS; gi = gi + 1) begin : g_tier
+            assign tier_keep[gi] = valid[gi] && (score[gi] >= tier_threshold);
+        end
+    endgenerate
 
     // Saturating add — instantiated PER SLOT below (distributed accumulators). There
     // is deliberately no shared sum result broadcast to all slots: a single adder

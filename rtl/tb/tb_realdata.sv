@@ -17,6 +17,8 @@ module tb_realdata;
     reg acc_valid = 0; reg [SLOT_WIDTH-1:0] acc_slot = 0; reg [WEIGHT_WIDTH-1:0] acc_weight = 0;
     reg ld_valid = 0;  reg [SLOT_WIDTH-1:0] ld_slot = 0;
     reg evict_req = 0;
+    reg [SCORE_WIDTH-1:0] tier_threshold = 0;
+    wire [N_SLOTS-1:0] tier_keep;
     wire evict_valid; wire [SLOT_WIDTH-1:0] evict_slot; wire busy;
 
     token_importance_unit #(
@@ -26,6 +28,7 @@ module tb_realdata;
         .acc_valid(acc_valid), .acc_slot(acc_slot), .acc_weight(acc_weight),
         .ld_valid(ld_valid), .ld_slot(ld_slot),
         .evict_req(evict_req), .evict_valid(evict_valid), .evict_slot(evict_slot),
+        .tier_threshold(tier_threshold), .tier_keep(tier_keep),
         .busy(busy)
     );
 

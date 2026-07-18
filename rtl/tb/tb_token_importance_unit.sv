@@ -16,6 +16,8 @@ module tb_token_importance_unit;
     reg acc_valid = 0; reg [SLOT_WIDTH-1:0] acc_slot = 0; reg [WEIGHT_WIDTH-1:0] acc_weight = 0;
     reg ld_valid = 0;  reg [SLOT_WIDTH-1:0] ld_slot = 0;
     reg evict_req = 0;
+    reg [SCORE_WIDTH-1:0] tier_threshold = 0;
+    wire [N_SLOTS-1:0] tier_keep;
     wire evict_valid; wire [SLOT_WIDTH-1:0] evict_slot; wire busy;
 
     token_importance_unit #(
@@ -25,6 +27,7 @@ module tb_token_importance_unit;
         .acc_valid(acc_valid), .acc_slot(acc_slot), .acc_weight(acc_weight),
         .ld_valid(ld_valid), .ld_slot(ld_slot),
         .evict_req(evict_req), .evict_valid(evict_valid), .evict_slot(evict_slot),
+        .tier_threshold(tier_threshold), .tier_keep(tier_keep),
         .busy(busy)
     );
 
@@ -118,6 +121,18 @@ module tb_token_importance_unit;
         do_load(1); do_load(3);
         do_acc(1, 5);
         do_evict();  // slot1 has mass 5, the new min
+
+        // Tier handshake: set a threshold, check tier_keep matches valid && score>=thr
+        tier_threshold = 8'd40;
+        #1;
+        for (i = 0; i < N_SLOTS; i = i + 1) begin
+            tests = tests + 1;
+            if (tier_keep[i] === (sh_valid[i] && (sh_score[i] >= tier_threshold)))
+                passed = passed + 1;
+            else $display("  MISMATCH tier[%0d]: got %b exp %b (valid=%0d score=%0d thr=%0d)",
+                          i, tier_keep[i], (sh_valid[i] && (sh_score[i]>=tier_threshold)),
+                          sh_valid[i], sh_score[i], tier_threshold);
+        end
 
         // Randomized soak
         for (r=0;r<200;r=r+1) begin
