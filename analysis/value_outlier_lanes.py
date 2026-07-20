@@ -17,9 +17,20 @@ ratios. Auto-derives the sensitive-layer sets (top-6 by INT3 error) and doubles 
 the missing 1.5B KEY probe ("keys flat across layers" was measured on 0.5B only,
 before the key/value fragility asymmetry flipped at 1.5B).
 
-Phase 1 (HellaSwag acc_norm): eight arms -- fp16 / uniform4 / uniform3 /
+Phase 1 (HellaSwag acc_norm): ten arms -- fp16 / uniform4 / uniform3 /
 mixed_top6 (re-test at n=1000) / INT3+2 lanes all layers / INT3+4 lanes /
-lanes only on sensitive layers / per-layer keys (top-6 CQ4+, rest CQ3+).
+lanes only on sensitive layers / per-layer keys (top-6 CQ4+, rest CQ3+) /
+WHT-rotated INT3 values / WHT-rotated INT2 values (stretch).
+
+The WHT arms complete the outlier-medicine triangle: lanes ISOLATE the hot
+channels (FP16 lane), grouped-INT2 LOCALIZES them (graded_grouped2.py), the
+Walsh-Hadamard rotation SPREADS them -- spin each value row before quantizing so
+no single channel sets the per-token scale, un-spin on read (H is self-inverse).
+This is the retired TurboQuant+ rotation applied to VALUES ONLY: the -0.10 GQA
+collapse that killed TurboQuant+ was the rotation smearing the per-channel KEY
+outlier structure; values are per-token (each row self-contained), so that
+failure mode structurally cannot occur. Keys stay untouched ChannelQuant.
+Rotation is compute, not storage: bit accounting is unchanged (lanes=0).
 
 Same transformers-5.x AttentionInterface plumbing and gotchas as
 graded_2bit.py / graded_grouped2.py: self-built causal mask, fp32 QK^T
@@ -39,11 +50,24 @@ G_TOK = 128          # token-group size for per-channel key scales (matches KVCE
 K_OUT_KEYS = 2       # FP16 outlier lanes keys already have (CQ-4+)
 
 # per-layer plan, filled in per arm: lists indexed by layer_idx
-CFG = {"fp16": True, "v_bits": None, "v_lanes": None, "k_bits": None, "probe": False}
+CFG = {"fp16": True, "v_bits": None, "v_lanes": None, "v_rot": None, "k_bits": None, "probe": False}
 PROBE = {}           # layer_idx -> accumulated stats
 
 
-def _q_values(v, bits, lanes):
+def _fwht(x):
+    """Orthonormal fast Walsh-Hadamard on the last dim (D must be a power of 2:
+    64 on 0.5B, 128 on 1.5B). Self-inverse: _fwht(_fwht(x)) == x."""
+    D = x.shape[-1]
+    h = 1
+    while h < D:
+        y = x.view(*x.shape[:-1], -1, h * 2)
+        a, b = y[..., :h], y[..., h:]
+        x = torch.cat((a + b, a - b), dim=-1).view(*x.shape)
+        h *= 2
+    return x / math.sqrt(D)
+
+
+def _q_values(v, bits, lanes, rot=False):
     """Per-token symmetric quant with optional FP16 outlier-channel lanes.
     Lane channels are picked per (B,H) by amax over tokens and are EXCLUDED from
     the per-token scale (they no longer stretch the ruler), then kept at fp16."""
@@ -51,6 +75,11 @@ def _q_values(v, bits, lanes):
         return v
     vf = v.float()
     B, H, T, D = vf.shape
+    if rot:
+        # SPREAD medicine: spin the row so the outlier stops setting the scale,
+        # quantize the flat row, spin back (H orthonormal -> self-inverse).
+        # Mutually exclusive with lanes (after rotation there are no hot channels).
+        return _fwht(_q_values(_fwht(vf), bits, 0)).to(v.dtype)
     if lanes > 0:
         idx = vf.abs().amax(2).topk(lanes, -1).indices                 # [B,H,lanes]
         om = torch.zeros(B, H, D, dtype=torch.bool, device=v.device)
@@ -118,7 +147,8 @@ def attn(module, query, key, value, attention_mask, scaling=None, dropout=0.0, *
         _probe_layer(li, key, value)
     elif not CFG["fp16"]:
         key = _q_keys(key, CFG["k_bits"][li])
-        value = _q_values(value, CFG["v_bits"][li], CFG["v_lanes"][li])
+        value = _q_values(value, CFG["v_bits"][li], CFG["v_lanes"][li],
+                          rot=CFG["v_rot"][li] if CFG["v_rot"] else False)
     scores = torch.matmul(query.float(), key.float().transpose(-1, -2)) * scaling
     i = torch.arange(Tq, device=scores.device).unsqueeze(-1)
     j = torch.arange(Tk, device=scores.device).unsqueeze(0)
@@ -154,7 +184,7 @@ def sensitive_set(probe, metric, top=6):
 
 
 def build_plan(name, L, sens_v, sens_k):
-    v_bits = [4] * L; v_lanes = [0] * L; k_bits = [4] * L; fp16 = False
+    v_bits = [4] * L; v_lanes = [0] * L; v_rot = [False] * L; k_bits = [4] * L; fp16 = False
     if name == "fp16":
         fp16 = True
     elif name == "uniform_v4":
@@ -171,9 +201,13 @@ def build_plan(name, L, sens_v, sens_k):
         v_bits = [3] * L; v_lanes = [2 if l in sens_v else 0 for l in range(L)]
     elif name == "kmix_top6_v4":
         k_bits = [4 if l in sens_k else 3 for l in range(L)]
+    elif name == "wht_all_v3":
+        v_bits = [3] * L; v_rot = [True] * L
+    elif name == "wht_all_v2":
+        v_bits = [2] * L; v_rot = [True] * L
     else:
         raise ValueError(name)
-    return {"fp16": fp16, "v_bits": v_bits, "v_lanes": v_lanes, "k_bits": k_bits}
+    return {"fp16": fp16, "v_bits": v_bits, "v_lanes": v_lanes, "v_rot": v_rot, "k_bits": k_bits}
 
 
 def avg_bits(plan, D=128):
@@ -187,7 +221,8 @@ def avg_bits(plan, D=128):
 
 
 ARMS = ["fp16", "uniform_v4", "uniform_v3", "mixed_top6",
-        "ol_all_k2", "ol_all_k4", "ol_top6_k2", "kmix_top6_v4"]
+        "ol_all_k2", "ol_all_k4", "ol_top6_k2", "kmix_top6_v4",
+        "wht_all_v3", "wht_all_v2"]
 
 
 def save(R, path, drive_dir):
