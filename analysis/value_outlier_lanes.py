@@ -55,9 +55,10 @@ G_TOK = 128          # token-group size for per-channel key scales (matches KVCE
 K_OUT_KEYS = 2       # FP16 outlier lanes keys already have (CQ-4+)
 
 # per-layer plan, filled in per arm: lists indexed by layer_idx
-CFG = {"fp16": True, "v_bits": None, "v_lanes": None, "v_rot": None, "v_lloyd": None,
-       "k_bits": None, "probe": False}
+CFG = {"fp16": True, "v_bits": None, "v_lanes": None, "v_rot": None, "v_rht": None,
+       "v_lloyd": None, "k_bits": None, "probe": False}
 PROBE = {}           # layer_idx -> accumulated stats
+_SIGNS = {}          # D -> fixed random ±1 sign vector (the RHT's diagonal)
 
 # Lloyd-Max codebook levels for N(0,1) (Max 1960), positive half; negatives mirror.
 # Post-WHT value rows are ~gaussian, where this codebook is the MSE-optimal
@@ -78,6 +79,17 @@ def _fwht(x):
     return x / math.sqrt(D)
 
 
+def _signs(D, device):
+    """Fixed random ±1 per channel (seeded, same vector everywhere -- in RTL this
+    is one programmable 128-bit sign register in front of the butterfly). Breaks
+    the fixed-H worst case: a flat row (big DC component) that H would CONCENTRATE
+    into one hot coordinate instead of spreading."""
+    if D not in _SIGNS:
+        g = torch.Generator().manual_seed(1234)
+        _SIGNS[D] = (torch.randint(0, 2, (D,), generator=g) * 2 - 1).float()
+    return _SIGNS[D].to(device)
+
+
 def _q_lloyd(x, bits):
     """Per-token RMS scale + Lloyd-Max N(0,1) codebook lookup on the last dim."""
     pos = _LLOYD_LEVELS[bits]
@@ -87,12 +99,15 @@ def _q_lloyd(x, bits):
     return lv[torch.bucketize(x / rms, th)] * rms
 
 
-def _q_values(v, bits, lanes, rot=False, lloyd=False):
+def _q_values(v, bits, lanes, rot=False, lloyd=False, rht=False):
     """Per-token symmetric quant with optional FP16 outlier-channel lanes.
     Lane channels are picked per (B,H) by amax over tokens and are EXCLUDED from
     the per-token scale (they no longer stretch the ruler), then kept at fp16.
-    rot spins the row with the WHT first (unspun after); lloyd swaps the uniform
-    round for the gaussian-optimal Lloyd-Max codebook (RMS row scale)."""
+    rot spins the row with the WHT first (unspun after); rht flips the fixed
+    random signs before the spin (randomized Hadamard: v -> (v*s)H, inverse
+    (x H)*s since s^2=1 and H is self-inverse -- deferred unspin still works,
+    the signs commute out the same way); lloyd swaps the uniform round for the
+    gaussian-optimal Lloyd-Max codebook (RMS row scale)."""
     if bits >= 16:
         return v
     vf = v.float()
@@ -101,8 +116,13 @@ def _q_values(v, bits, lanes, rot=False, lloyd=False):
         # SPREAD medicine: spin the row so the outlier stops setting the scale,
         # quantize the flat row, spin back (H orthonormal -> self-inverse).
         # Mutually exclusive with lanes (after rotation there are no hot channels).
-        inner = _q_lloyd(_fwht(vf), bits) if lloyd else _q_values(_fwht(vf), bits, 0)
-        return _fwht(inner).to(v.dtype)
+        s = _signs(D, v.device) if rht else None
+        x = _fwht(vf * s) if rht else _fwht(vf)
+        inner = _q_lloyd(x, bits) if lloyd else _q_values(x, bits, 0)
+        out = _fwht(inner)
+        if rht:
+            out = out * s
+        return out.to(v.dtype)
     if lloyd:
         # ablation control: Lloyd-Max WITHOUT the rotation, to separate how much
         # of any win comes from the codebook vs from the spin
@@ -176,7 +196,8 @@ def attn(module, query, key, value, attention_mask, scaling=None, dropout=0.0, *
         key = _q_keys(key, CFG["k_bits"][li])
         value = _q_values(value, CFG["v_bits"][li], CFG["v_lanes"][li],
                           rot=CFG["v_rot"][li] if CFG["v_rot"] else False,
-                          lloyd=CFG["v_lloyd"][li] if CFG["v_lloyd"] else False)
+                          lloyd=CFG["v_lloyd"][li] if CFG["v_lloyd"] else False,
+                          rht=CFG["v_rht"][li] if CFG["v_rht"] else False)
     scores = torch.matmul(query.float(), key.float().transpose(-1, -2)) * scaling
     i = torch.arange(Tq, device=scores.device).unsqueeze(-1)
     j = torch.arange(Tk, device=scores.device).unsqueeze(0)
@@ -212,8 +233,8 @@ def sensitive_set(probe, metric, top=6):
 
 
 def build_plan(name, L, sens_v, sens_k):
-    v_bits = [4] * L; v_lanes = [0] * L; v_rot = [False] * L; v_lloyd = [False] * L
-    k_bits = [4] * L; fp16 = False
+    v_bits = [4] * L; v_lanes = [0] * L; v_rot = [False] * L; v_rht = [False] * L
+    v_lloyd = [False] * L; k_bits = [4] * L; fp16 = False
     if name == "fp16":
         fp16 = True
     elif name == "uniform_v4":
@@ -238,10 +259,12 @@ def build_plan(name, L, sens_v, sens_k):
         v_bits = [3] * L; v_rot = [True] * L; v_lloyd = [True] * L
     elif name == "lloyd_v3":         # codebook without the spin (ablation control)
         v_bits = [3] * L; v_lloyd = [True] * L
+    elif name == "rht_all_v3":       # randomized Hadamard (Chaithu's RTL question)
+        v_bits = [3] * L; v_rot = [True] * L; v_rht = [True] * L
     else:
         raise ValueError(name)
     return {"fp16": fp16, "v_bits": v_bits, "v_lanes": v_lanes, "v_rot": v_rot,
-            "v_lloyd": v_lloyd, "k_bits": k_bits}
+            "v_rht": v_rht, "v_lloyd": v_lloyd, "k_bits": k_bits}
 
 
 def avg_bits(plan, D=128):
@@ -256,11 +279,12 @@ def avg_bits(plan, D=128):
 
 ARMS = ["fp16", "uniform_v4", "uniform_v3", "mixed_top6",
         "ol_all_k2", "ol_all_k4", "ol_top6_k2", "kmix_top6_v4",
-        "wht_all_v3", "wht_all_v2", "wht_lloyd_v3", "lloyd_v3"]
+        "wht_all_v3", "wht_all_v2", "wht_lloyd_v3", "lloyd_v3", "rht_all_v3"]
 
-# the promised follow-up set: baselines + rotation + lloyd-max + keys-below-4-bit.
-# ordered so a Colab timeout still leaves the load-bearing rows finished.
-CORE = ["fp16", "uniform_v4", "uniform_v3", "wht_all_v3",
+# the promised follow-up set: baselines + rotation + fixed-vs-randomized +
+# lloyd-max + keys-below-4-bit. ordered so a Colab timeout still leaves the
+# load-bearing rows finished.
+CORE = ["fp16", "uniform_v4", "uniform_v3", "wht_all_v3", "rht_all_v3",
         "wht_lloyd_v3", "lloyd_v3", "kmix_top6_v4"]
 
 
