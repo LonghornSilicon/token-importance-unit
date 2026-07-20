@@ -30,7 +30,7 @@ KV entry — so the KV cache stays within a fixed on-die budget as context grows
 | **Why** | KV cache grows linearly with context; a fixed on-die budget needs a policy for *which* tokens to drop first |
 | **How** | **H2O** — accumulate each token's post-softmax attention mass; keep a recent local window + the top "heavy-hitter" tokens by accumulated mass; evict the rest |
 | **Signal** | Post-softmax attention mass (the ACU sparsity study proved pre-softmax proxies fail at r≈0, post-softmax works at r≈0.99) |
-| **Integration** | Emits the **tier signal** that the KV Cache Engine already consumes (keep → CQ-8, demote → CQ-4, evict → drop) — mixed-precision retention |
+| **Integration** | Emits the **tier signal** the KV Cache Engine consumes: **evict → drop** (the primary lever) and, pre-CQ-3-rot, keep → CQ-8 / demote → CQ-4. The **value-precision (keep/demote) role is retired under CQ-3-rot** — flat WHT-rotated INT3 values replace the CQ-8/CQ-4 value ladder; the TIU keeps evict/keep. See `docs/tier_handshake.md`. |
 | **Verified (algorithm)** | HellaSwag acc_norm within **−0.006** of full cache down to **25% KV budget** on Qwen2-0.5B (n=500) |
 | **Status** | Built & signed off — RTL verified (29/29 directed, 40/40 real-data replay), **0-violation Sky130**, bit-exact Python reference at parity, ISA spec + paper shipped |
 
