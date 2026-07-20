@@ -29,6 +29,15 @@ Per cached token `t` occupying slot `s`:
    - `tier_keep[s] = 1` (heavy hitter) → store the **value at CQ-8** (per-token INT8).
    - `tier_keep[s] = 0` (demote)       → store the **value at CQ-4** (per-token INT4).
 
+> **RETIRED under CQ-3-rot (branch, 2026-07-20).** The WHT-rotated INT3 value tier
+> (`kv-cache-engine` `docs/wht_value_rotation.md`, idea: Abhiram Bandi + Chaithu Talasila)
+> makes **all** values a flat, uniform 3 bits — better than the CQ-8/CQ-4 ladder at less
+> memory and no calibration. There is no per-token value bit-width left to select, so the
+> **value-precision role of `tier_keep` is retired**: the TIU keeps only its **evict-or-keep**
+> lever (item 1), which applies to K and V alike. The `tier_keep` comparators may be left
+> dormant or removed; the eviction datapath is unchanged. This section describes the
+> pre-CQ-3-rot design and is kept for provenance.
+
 ## Why the tier drives VALUES, not KEYS
 
 ChannelQuant compresses **keys per-channel** (one scale per channel dim, shared across a
