@@ -20,7 +20,12 @@ before the key/value fragility asymmetry flipped at 1.5B).
 Phase 1 (HellaSwag acc_norm): ten arms -- fp16 / uniform4 / uniform3 /
 mixed_top6 (re-test at n=1000) / INT3+2 lanes all layers / INT3+4 lanes /
 lanes only on sensitive layers / per-layer keys (top-6 CQ4+, rest CQ3+) /
-WHT-rotated INT3 values / WHT-rotated INT2 values (stretch).
+WHT-rotated INT3 values / WHT-rotated INT2 values (stretch) / WHT + Lloyd-Max
+INT3 (the full TurboQuant value path: post-rotation rows are ~gaussian, where
+the Lloyd-Max codebook is MSE-optimal vs uniform ticks) / Lloyd-Max without
+the rotation (ablation: codebook contribution vs spin contribution).
+--arms selects: 'core' = the promised follow-up set (baselines, rotation,
+lloyd-max, keys below 4 bit per layer), 'all', or a comma list.
 
 The WHT arms complete the outlier-medicine triangle: lanes ISOLATE the hot
 channels (FP16 lane), grouped-INT2 LOCALIZES them (graded_grouped2.py), the
@@ -50,8 +55,14 @@ G_TOK = 128          # token-group size for per-channel key scales (matches KVCE
 K_OUT_KEYS = 2       # FP16 outlier lanes keys already have (CQ-4+)
 
 # per-layer plan, filled in per arm: lists indexed by layer_idx
-CFG = {"fp16": True, "v_bits": None, "v_lanes": None, "v_rot": None, "k_bits": None, "probe": False}
+CFG = {"fp16": True, "v_bits": None, "v_lanes": None, "v_rot": None, "v_lloyd": None,
+       "k_bits": None, "probe": False}
 PROBE = {}           # layer_idx -> accumulated stats
+
+# Lloyd-Max codebook levels for N(0,1) (Max 1960), positive half; negatives mirror.
+# Post-WHT value rows are ~gaussian, where this codebook is the MSE-optimal
+# quantizer -- this is TurboQuant's value quantizer (norm -> WHT -> Lloyd-Max).
+_LLOYD_LEVELS = {3: [0.2451, 0.7560, 1.3439, 2.1520], 2: [0.4528, 1.5104]}
 
 
 def _fwht(x):
@@ -67,10 +78,21 @@ def _fwht(x):
     return x / math.sqrt(D)
 
 
-def _q_values(v, bits, lanes, rot=False):
+def _q_lloyd(x, bits):
+    """Per-token RMS scale + Lloyd-Max N(0,1) codebook lookup on the last dim."""
+    pos = _LLOYD_LEVELS[bits]
+    lv = torch.tensor([-l for l in reversed(pos)] + pos, device=x.device)
+    th = (lv[1:] + lv[:-1]) / 2
+    rms = x.pow(2).mean(-1, keepdim=True).sqrt().clamp(min=EPS)
+    return lv[torch.bucketize(x / rms, th)] * rms
+
+
+def _q_values(v, bits, lanes, rot=False, lloyd=False):
     """Per-token symmetric quant with optional FP16 outlier-channel lanes.
     Lane channels are picked per (B,H) by amax over tokens and are EXCLUDED from
-    the per-token scale (they no longer stretch the ruler), then kept at fp16."""
+    the per-token scale (they no longer stretch the ruler), then kept at fp16.
+    rot spins the row with the WHT first (unspun after); lloyd swaps the uniform
+    round for the gaussian-optimal Lloyd-Max codebook (RMS row scale)."""
     if bits >= 16:
         return v
     vf = v.float()
@@ -79,7 +101,12 @@ def _q_values(v, bits, lanes, rot=False):
         # SPREAD medicine: spin the row so the outlier stops setting the scale,
         # quantize the flat row, spin back (H orthonormal -> self-inverse).
         # Mutually exclusive with lanes (after rotation there are no hot channels).
-        return _fwht(_q_values(_fwht(vf), bits, 0)).to(v.dtype)
+        inner = _q_lloyd(_fwht(vf), bits) if lloyd else _q_values(_fwht(vf), bits, 0)
+        return _fwht(inner).to(v.dtype)
+    if lloyd:
+        # ablation control: Lloyd-Max WITHOUT the rotation, to separate how much
+        # of any win comes from the codebook vs from the spin
+        return _q_lloyd(vf, bits).to(v.dtype)
     if lanes > 0:
         idx = vf.abs().amax(2).topk(lanes, -1).indices                 # [B,H,lanes]
         om = torch.zeros(B, H, D, dtype=torch.bool, device=v.device)
@@ -148,7 +175,8 @@ def attn(module, query, key, value, attention_mask, scaling=None, dropout=0.0, *
     elif not CFG["fp16"]:
         key = _q_keys(key, CFG["k_bits"][li])
         value = _q_values(value, CFG["v_bits"][li], CFG["v_lanes"][li],
-                          rot=CFG["v_rot"][li] if CFG["v_rot"] else False)
+                          rot=CFG["v_rot"][li] if CFG["v_rot"] else False,
+                          lloyd=CFG["v_lloyd"][li] if CFG["v_lloyd"] else False)
     scores = torch.matmul(query.float(), key.float().transpose(-1, -2)) * scaling
     i = torch.arange(Tq, device=scores.device).unsqueeze(-1)
     j = torch.arange(Tk, device=scores.device).unsqueeze(0)
@@ -184,7 +212,8 @@ def sensitive_set(probe, metric, top=6):
 
 
 def build_plan(name, L, sens_v, sens_k):
-    v_bits = [4] * L; v_lanes = [0] * L; v_rot = [False] * L; k_bits = [4] * L; fp16 = False
+    v_bits = [4] * L; v_lanes = [0] * L; v_rot = [False] * L; v_lloyd = [False] * L
+    k_bits = [4] * L; fp16 = False
     if name == "fp16":
         fp16 = True
     elif name == "uniform_v4":
@@ -205,9 +234,14 @@ def build_plan(name, L, sens_v, sens_k):
         v_bits = [3] * L; v_rot = [True] * L
     elif name == "wht_all_v2":
         v_bits = [2] * L; v_rot = [True] * L
+    elif name == "wht_lloyd_v3":     # full TurboQuant value path: WHT + Lloyd-Max
+        v_bits = [3] * L; v_rot = [True] * L; v_lloyd = [True] * L
+    elif name == "lloyd_v3":         # codebook without the spin (ablation control)
+        v_bits = [3] * L; v_lloyd = [True] * L
     else:
         raise ValueError(name)
-    return {"fp16": fp16, "v_bits": v_bits, "v_lanes": v_lanes, "v_rot": v_rot, "k_bits": k_bits}
+    return {"fp16": fp16, "v_bits": v_bits, "v_lanes": v_lanes, "v_rot": v_rot,
+            "v_lloyd": v_lloyd, "k_bits": k_bits}
 
 
 def avg_bits(plan, D=128):
@@ -222,7 +256,12 @@ def avg_bits(plan, D=128):
 
 ARMS = ["fp16", "uniform_v4", "uniform_v3", "mixed_top6",
         "ol_all_k2", "ol_all_k4", "ol_top6_k2", "kmix_top6_v4",
-        "wht_all_v3", "wht_all_v2"]
+        "wht_all_v3", "wht_all_v2", "wht_lloyd_v3", "lloyd_v3"]
+
+# the promised follow-up set: baselines + rotation + lloyd-max + keys-below-4-bit.
+# ordered so a Colab timeout still leaves the load-bearing rows finished.
+CORE = ["fp16", "uniform_v4", "uniform_v3", "wht_all_v3",
+        "wht_lloyd_v3", "lloyd_v3", "kmix_top6_v4"]
 
 
 def save(R, path, drive_dir):
@@ -248,7 +287,13 @@ def main():
     ap.add_argument("--batch_size", type=int, default=16)
     ap.add_argument("--out", default="value_outlier_lanes_result.json")
     ap.add_argument("--drive_dir", default="/content/drive/MyDrive/tiu_runs")
+    ap.add_argument("--arms", default="core",
+                    help="'core' (promised follow-ups), 'all', or comma list of arm names")
     a = ap.parse_args()
+    arms = CORE if a.arms == "core" else ARMS if a.arms == "all" else a.arms.split(",")
+    for nm in arms:
+        if nm not in ARMS:
+            raise SystemExit(f"unknown arm: {nm}")
     import lm_eval
     from lm_eval.models.huggingface import HFLM
 
@@ -281,7 +326,7 @@ def main():
     print(f"sensitive key   layers (top-6 by k3 err): {sens_k}")
 
     lm = HFLM(pretrained=model, tokenizer=tok, batch_size=a.batch_size)
-    for name in ARMS:
+    for name in arms:
         if name in R["results"]:
             print(f"  {name:14s} already done -- skipping"); continue
         plan = build_plan(name, L, set(sens_v), set(sens_k))
