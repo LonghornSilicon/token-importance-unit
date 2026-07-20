@@ -1,5 +1,11 @@
 # Token Importance Unit
 
+> 📐 **RTL lives on the [`rtl`](../../tree/rtl) branch, not `main`.** `main` carries the
+> spec, reference model, analysis, and paper; all SystemVerilog, testbenches, OpenLane,
+> golden traces, and the RTL/reference CI gates live on `rtl`. The RTL and its
+> **0-violation sign-off are 130nm (SkyWater Sky130)** — the best open-PDK proxy, used for
+> 16nm *estimates* and realizability, not the 16nm design itself.
+
 This is the **Token Importance Unit (TIU)** block of the LonghornSilicon LLM
 inference accelerator — **block 3 of four** targeting TSMC 16nm FinFET (N16FFC)
 tape-out. It decides, per cached token, whether to **keep, demote, or evict** its
