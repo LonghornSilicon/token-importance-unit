@@ -73,7 +73,11 @@ class H2OScheduler:
     a new token arrives, it asks the TIU for the minimum-mass victim (the core's
     serialized argmin), evicts it, and reuses the freed slot. Every query's
     post-softmax attention over the currently cached tokens is fed back as ACC
-    weights -- exactly the op stream the RTL replay testbench consumes.
+    weights -- the same LOAD / ACC / EVICT ops the RTL replay testbench
+    consumes. The weights arrive computed against the pre-step cache, so step()
+    credits them before any eviction; the replay-trace generator instead
+    recomputes its weights post-admission, keyed by each slot's current
+    occupant. Both are valid orderings of the same op vocabulary.
     """
 
     def __init__(self, info: TokenImportanceUnitInfo) -> None:
@@ -83,21 +87,27 @@ class H2OScheduler:
         self.schedule = []                         # (query_token, evicted_token, slot)
 
     def step(self, token_id: int, attn_over_cache: dict) -> None:
-        """Admit `token_id`; `attn_over_cache` maps slot -> INT weight for this step."""
+        """Admit `token_id`; `attn_over_cache` maps slot -> INT weight for this step.
+
+        The weights were computed against the tokens cached BEFORE this step,
+        so they are credited first — before any eviction frees a slot for the
+        new token. Accumulating after the LOAD would hand the evicted token's
+        attention mass to the fresh token reusing its slot.
+        """
         info = self.info
-        # 1. find a free slot, else evict the TIU-chosen victim and reuse it.
+        # 1. credit this query's attention mass to the tokens it was computed against.
+        for slot, weight in attn_over_cache.items():
+            if self.tiu.valid[slot] and weight > 0:
+                self.tiu.acc(slot, weight)
+        # 2. find a free slot, else evict the TIU-chosen victim and reuse it.
         free = next((k for k in range(info.n_slots) if not self.tiu.valid[k]), None)
         if free is None:
             victim_slot = self.tiu.evict()
             self.schedule.append((token_id, self.slot_token[victim_slot], victim_slot))
             free = victim_slot
-        # 2. install the new token.
+        # 3. install the new token.
         self.tiu.load(free)
         self.slot_token[free] = token_id
-        # 3. accumulate this query's attention mass onto every cached token.
-        for slot, weight in attn_over_cache.items():
-            if self.tiu.valid[slot] and weight > 0:
-                self.tiu.acc(slot, weight)
 
 
 def level_b_eviction_schedule(info: TokenImportanceUnitInfo, num_tokens: int):

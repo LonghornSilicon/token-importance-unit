@@ -4,7 +4,7 @@
 The critic's objection to our HellaSwag numbers: HellaSwag prompts are ~50-100 tokens,
 so TIU eviction (25% budget) + ChannelQuant never stress a large cache — the exact
 regime the accelerator exists for. This measures **perplexity vs context length** on a
-long document (WikiText-103), full stack (TIU evict 25% + KVCE cq4+ + APA INT8) vs FP16
+long document (WikiText-2), full stack (TIU evict 25% + KVCE cq4+ + APA INT8) vs FP16
 full cache. If the gap stays flat as context grows from 256 -> 4096 tokens, the ~3%
 result is a real long-context number, not a short-prompt artifact.
 

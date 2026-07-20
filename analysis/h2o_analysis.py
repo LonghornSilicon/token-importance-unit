@@ -63,7 +63,9 @@ def h2o_attention(module, query, key, value, attention_mask,
         keep = recent | heavy                                   # retained set
         over = (i + 1) > C                                      # only evict once over budget
         keep = torch.where(over, keep, causal)                  # under budget => keep all
-        STATS["kept"] += int(keep.sum().item())
+        # recent=(i-j)<L is True for all future j too; AND with causal so the
+        # kept-fraction stat counts only real (causal) retained positions.
+        STATS["kept"] += int((keep & causal).sum().item())
         STATS["total"] += int(causal.sum().item()) * B * H   # causal is [Tq,Tk]; keep is [B,H,Tq,Tk]
         Am = A * keep
         Am = Am / Am.sum(-1, keepdim=True).clamp(min=1e-9)      # renormalize over retained
@@ -109,12 +111,18 @@ def main():
         results[f"{fr:.2f}"] = {"frac": fr, "acc_norm": acc, "kept_frac": round(kept, 4)}
         print(f"  budget={fr:.2f}  acc_norm={acc:.4f}  kept={kept:.3f}")
 
-    base = results[f"{fracs[0]:.2f}"]["acc_norm"]
+    # Baseline the deltas on the true full-cache run; if the sweep didn't
+    # include frac=1.0, fall back to the largest budget and say so.
+    base_frac = 1.0 if f"{1.0:.2f}" in results else max(fracs)
+    base = results[f"{base_frac:.2f}"]["acc_norm"]
+    if base_frac != 1.0:
+        print(f"note: no frac=1.00 in sweep; deltas are vs budget={base_frac:.2f}")
     for r in results.values():
         r["delta_vs_full"] = round(r["acc_norm"] - base, 4)
     with open(args.out, "w") as f:
         json.dump({"model": args.model, "n": args.n,
-                   "recent_ratio": args.recent_ratio, "results": results}, f, indent=2)
+                   "recent_ratio": args.recent_ratio,
+                   "delta_baseline_frac": base_frac, "results": results}, f, indent=2)
     print("\n=== H2O accuracy vs KV budget (Δ vs full cache) ===")
     for name, r in results.items():
         print(f"  budget={name}  acc={r['acc_norm']:.4f}  Δ={r['delta_vs_full']:+.4f}  kept={r['kept_frac']}")

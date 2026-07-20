@@ -315,6 +315,14 @@ for t in tokens:
         TIU_ACC(slot, w)           // 1 cycle each; accumulate received mass
 \end{lstlisting}
 
+\noindent\texttt{attn\_mass\_over\_cache(t)} is evaluated \emph{after} the
+\texttt{TIU\_LOAD}, keyed by each slot's \emph{current} occupant (token $t$'s
+self-attention included). A wrapper that instead precomputes weights against the
+pre-step cache must issue those \texttt{TIU\_ACC}s \emph{before} the
+\texttt{TIU\_EVICT} --- otherwise the evicted token's mass is credited to the
+fresh token reusing its slot (cf.\ \texttt{H2OScheduler.step} in the reference
+model).
+
 \textbf{Value-tier pass} (when the KVCE (re)compresses a surviving token's value):
 \begin{lstlisting}[basicstyle=\ttfamily\small]
 TIU_SET_TIER(threshold)            // e.g. a percentile of accumulated mass

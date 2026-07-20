@@ -15,8 +15,10 @@ Scripts: `analysis/h2o_longctx.py`, `analysis/h2o_perhead_vs_shared.py`,
 
 ## 1. Long-context knee — WikiText-2 perplexity
 
-HellaSwag sequences are short, so eviction barely triggers there (kept ≈ 0.97 even at
-a 25% budget) and the knee is soft. This test concatenates WikiText-2-raw test into
+HellaSwag sequences are short, so the absolute caches are tiny and the knee is soft.
+(The kept ≈ 0.97 once reported for HellaSwag was an artifact of the stat counting
+non-causal positions; the causal kept fraction is set by the budget geometry, ~0.44
+at a 25% budget, same as below.) This test concatenates WikiText-2-raw test into
 non-overlapping 1024-token windows (131,072 tokens total) and measures perplexity
 under H2O eviction vs KV budget — every window is now long enough that the budget
 actually bites.
@@ -31,8 +33,8 @@ actually bites.
 | 0.10 | 16.108 | 1.089 | 0.189 |
 | 0.05 | 18.583 | 1.257 | 0.097 |
 
-The `kept frac` now genuinely reflects eviction (0.44 at a 25% budget on 1024-token
-windows, vs ~0.97 on short HellaSwag). Perplexity is flat down to 50% (+0.0%),
+The `kept frac` genuinely reflects eviction (0.44 at a 25% budget on 1024-token
+windows, matching the budget geometry). Perplexity is flat down to 50% (+0.0%),
 near-flat at 25% (**+1.0%**), then bends: +4.0% at 15%, +8.9% at 10%, +25.7% at 5%.
 
 **Takeaway:** on real long context the 25% gold budget is near-lossless (+1% ppl) and

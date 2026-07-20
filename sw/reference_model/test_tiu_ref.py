@@ -92,7 +92,37 @@ def test_trace_has_expected_shape():
     assert n_evict == 40, f"expected 40 evictions in the golden trace, got {n_evict}"
 
 
+def test_scheduler_credits_pre_step_occupants():
+    """H2OScheduler must credit attention to the tokens it was computed against.
+
+    Regression for a wrapper bug where ACC ran after EVICT+LOAD had reused a
+    slot, so the evicted token's attention mass was credited to the fresh token
+    that replaced it.
+    """
+    from example_compiler_use import H2OScheduler
+
+    info = TokenImportanceUnitInfo()
+    sched = H2OScheduler(info)
+    for t in range(info.n_slots):
+        sched.step(t, {})
+    # every slot holds mass 100 except slot 0 (mass 1, the clear victim)
+    for slot in range(info.n_slots):
+        sched.tiu.acc(slot, 1 if slot == 0 else 100)
+
+    # admit token 8 with attention on the soon-to-be-evicted slot 0
+    sched.step(8, {0: 50, 1: 10})
+
+    assert sched.schedule == [(8, 0, 0)], f"schedule = {sched.schedule}"
+    assert sched.slot_token[0] == 8
+    # token 8 starts from a clean accumulator -- the 50 units belonged to token 0
+    assert sched.tiu.score[0] == 0, \
+        f"evicted token's mass leaked to its replacement (score={sched.tiu.score[0]})"
+    # slot 1's surviving occupant keeps its own credit: 100 + 10
+    assert sched.tiu.score[1] == 110, f"score[1] = {sched.tiu.score[1]}"
+
+
 if __name__ == "__main__":
     test_trace_has_expected_shape()
     test_replay_matches_rtl()
+    test_scheduler_credits_pre_step_occupants()
     print("ALL SELF-TESTS PASSED")

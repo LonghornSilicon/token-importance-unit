@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Token Importance Unit (LonghornSilicon block 3) — long-context knee study.
 
-HellaSwag sequences are short, so H2O eviction barely triggers (kept ~0.97 at a
-25% budget) and the accuracy knee is soft. This script exercises the policy on
+HellaSwag sequences are short, so the absolute caches are tiny and the accuracy
+knee is soft. This script exercises the policy on
 genuinely long sequences: WikiText-2 test concatenated into ~1024-token windows,
 measuring perplexity under H2O eviction vs KV budget. On long context the cache
 budget actually bites every window, so the knee shows up much more sharply than
@@ -131,13 +131,19 @@ def main():
                                 "kept_frac": round(kept, 4)}
         print(f"  budget={fr:.2f}  ppl={ppl:.3f}  kept={kept:.3f}")
 
-    base = results[f"{fracs[0]:.2f}"]["ppl"]
+    # Baseline on the true full-cache run; if the sweep didn't include
+    # frac=1.0, fall back to the largest budget and say so.
+    base_frac = 1.0 if f"{1.0:.2f}" in results else max(fracs)
+    base = results[f"{base_frac:.2f}"]["ppl"]
+    if base_frac != 1.0:
+        print(f"note: no frac=1.00 in sweep; ratios/deltas are vs budget={base_frac:.2f}")
     for r in results.values():
         r["ppl_ratio_vs_full"] = round(r["ppl"] / base, 4)
         r["delta_ppl_vs_full"] = round(r["ppl"] - base, 4)
     with open(args.out, "w") as f:
         json.dump({"model": args.model, "window": args.window, "n_tokens": n_tok,
-                   "recent_ratio": args.recent_ratio, "results": results}, f, indent=2)
+                   "recent_ratio": args.recent_ratio,
+                   "delta_baseline_frac": base_frac, "results": results}, f, indent=2)
     print("\n=== H2O WikiText-2 perplexity vs KV budget (long context) ===")
     for name, r in results.items():
         print(f"  budget={name}  ppl={r['ppl']:.3f}  x{r['ppl_ratio_vs_full']:.3f}  kept={r['kept_frac']}")

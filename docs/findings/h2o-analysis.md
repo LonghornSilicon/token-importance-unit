@@ -78,10 +78,11 @@ local coherence.
 edge (−0.014); below ~15% it falls off. This is the config carried into the RTL and
 the all-3-blocks integration test.
 
-Caveat: HellaSwag sequences are short, so eviction only bites the longer ones
-(kept-fraction stays ~0.97) — the accuracy impact is real but concentrated. A
-2–4K-token trace would exercise the policy harder; HellaSwag is used here for
-consistency with blocks 1 & 2.
+Caveat: HellaSwag sequences are short, so the absolute caches are tiny. (The
+kept-fraction ~0.97 once reported here was an artifact of the stat counting
+non-causal positions; the causal kept fraction is ~0.44 at a 25% budget — see
+`h2o-deep-analysis.md`.) A 2–4K-token trace would exercise the policy harder;
+HellaSwag is used here for consistency with blocks 1 & 2.
 
 ## Next
 

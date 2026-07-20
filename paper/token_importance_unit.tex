@@ -192,10 +192,13 @@ KV budget & acc\_norm & $\Delta$ vs.\ full \\
 
 \subsection{Long-context knee}
 
-HellaSwag sequences are short, so eviction barely triggers there (kept fraction
-$\approx0.97$ at a 25\% budget) and the knee is soft. Concatenating WikiText-2 into
-non-overlapping 1024-token windows (131{,}072 tokens) exercises the budget
-properly: the kept fraction drops to 0.44 at a 25\% budget, and perplexity is flat
+HellaSwag sequences are short, so the absolute caches are tiny and the knee is
+soft. (The kept fraction $\approx0.97$ once reported there was an artifact of the
+statistic counting non-causal positions; the causal kept fraction is set by the
+budget geometry, $\approx$0.44 at a 25\% budget on short and long context alike.)
+Concatenating WikiText-2 into non-overlapping 1024-token windows (131{,}072
+tokens) exercises the budget properly: the kept fraction is 0.44 at a 25\% budget,
+and perplexity is flat
 to 50\% (+0.0\%), near-flat at 25\% (\textbf{+1.0\%}), then bends --- +4.0\% at
 15\%, +8.9\% at 10\%, +25.7\% at 5\%. On genuinely long context the 25\% gold
 budget is near-lossless and the knee sits around 10--15\%, sharper and cleaner than
