@@ -108,13 +108,23 @@ module token_importance_unit #(
     // output feeding N_SLOTS register-input muxes was the high-fanout net that blew
     // max-transition in Sky130. Each slot owns its adder (a tiny WEIGHT_WIDTH add),
     // driven only by its own score and the broadcast acc_weight (easy to buffer).
+    // The sum is computed one bit wider than the WIDER of the two operands, so
+    // WEIGHT_WIDTH > SCORE_WIDTH configs (in the ISA's validated range) elaborate
+    // and saturate correctly. For WEIGHT_WIDTH <= SCORE_WIDTH this reduces to the
+    // same (SCORE_WIDTH+1)-bit add as before — no change to the signed-off config.
+    localparam integer EXT_WIDTH =
+        ((WEIGHT_WIDTH > SCORE_WIDTH) ? WEIGHT_WIDTH : SCORE_WIDTH) + 1;
+
     function [SCORE_WIDTH-1:0] sat_add;
         input [SCORE_WIDTH-1:0] s;
         input [WEIGHT_WIDTH-1:0] w;
-        reg [SCORE_WIDTH:0] ext;
+        reg [EXT_WIDTH-1:0] ext;
         begin
-            ext = {1'b0, s} + {{(SCORE_WIDTH-WEIGHT_WIDTH+1){1'b0}}, w};
-            sat_add = ext[SCORE_WIDTH] ? SCORE_MAX : ext[SCORE_WIDTH-1:0];
+            ext = {{(EXT_WIDTH-SCORE_WIDTH){1'b0}}, s}
+                + {{(EXT_WIDTH-WEIGHT_WIDTH){1'b0}}, w};
+            // overflow iff any bit above SCORE_WIDTH-1 is set; reduces to the
+            // single carry bit ext[SCORE_WIDTH] when WEIGHT_WIDTH <= SCORE_WIDTH
+            sat_add = (|ext[EXT_WIDTH-1:SCORE_WIDTH]) ? SCORE_MAX : ext[SCORE_WIDTH-1:0];
         end
     endfunction
 
