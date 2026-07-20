@@ -79,15 +79,21 @@ def _fwht(x):
     return x / math.sqrt(D)
 
 
+RHT_SEED = [1234]    # mutable default; --rht_seed plugs in the frozen winner
+
+
 def _signs(D, device):
     """Fixed random ±1 per channel (seeded, same vector everywhere -- in RTL this
-    is one programmable 128-bit sign register in front of the butterfly). Breaks
+    is one programmable 128-bit sign register in front of the butterfly; all +1s
+    = plain fixed H, so fixed can ship as the default register value). Breaks
     the fixed-H worst case: a flat row (big DC component) that H would CONCENTRATE
-    into one hot coordinate instead of spreading."""
-    if D not in _SIGNS:
-        g = torch.Generator().manual_seed(1234)
-        _SIGNS[D] = (torch.randint(0, 2, (D,), generator=g) * 2 - 1).float()
-    return _SIGNS[D].to(device)
+    into one hot coordinate instead of spreading. Seed selection = design-time
+    decision; see rht_seed_sweep.py for the no-layer/head-spike sweep."""
+    key = (D, RHT_SEED[0])
+    if key not in _SIGNS:
+        g = torch.Generator().manual_seed(RHT_SEED[0])
+        _SIGNS[key] = (torch.randint(0, 2, (D,), generator=g) * 2 - 1).float()
+    return _SIGNS[key].to(device)
 
 
 def _q_lloyd(x, bits):
@@ -313,7 +319,10 @@ def main():
     ap.add_argument("--drive_dir", default="/content/drive/MyDrive/tiu_runs")
     ap.add_argument("--arms", default="core",
                     help="'core' (promised follow-ups), 'all', or comma list of arm names")
+    ap.add_argument("--rht_seed", type=int, default=1234,
+                    help="sign-vector seed for rht arms (plug in the sweep winner)")
     a = ap.parse_args()
+    RHT_SEED[0] = a.rht_seed
     arms = CORE if a.arms == "core" else ARMS if a.arms == "all" else a.arms.split(",")
     for nm in arms:
         if nm not in ARMS:
