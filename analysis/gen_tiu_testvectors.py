@@ -5,7 +5,8 @@ Runs Qwen2-0.5B on a fixed prompt, hooks one (layer, head), and streams its caus
 post-softmax attention through an H2O cache of N_SLOTS slots. Emits the exact
 LOAD / ACC / EVICT op stream the RTL consumes, with the expected eviction victim on
 every EVICT — computed by a Python reference that mirrors the RTL's argmin semantics
-(seed slot 0, strict-less scan 0..N-1, saturating WEIGHT_WIDTH-bit accumulators).
+(seed slot 0; a valid slot always beats a min that never came from a valid slot,
+then strict-less scan 0..N-1; saturating SCORE_WIDTH-bit accumulators).
 
 Output: rtl/tb/testvectors/tiu_trace.hex, lines of  "<op> <slot> <weight> <exp>":
   op 0 = ACC   (slot, weight)
@@ -40,12 +41,15 @@ def sat_add(s, w, smax):
 
 
 def argmin_victim(score, valid, n):
-    """Mirror the RTL: seed with slot 0, strict-less scan 0..n-1."""
-    m_score = score[0] if valid[0] else (1 << 30)
+    """Mirror the RTL: seed slot 0; a valid slot always beats a min that never
+    came from a valid slot, then strict-less scan 0..n-1 (matches
+    sw/reference_model/tiu_ref.py argmin_victim)."""
+    m_score = 0
     m_idx = 0
+    m_seen = False
     for k in range(n):
-        if valid[k] and score[k] < m_score:
-            m_score = score[k]; m_idx = k
+        if valid[k] and (not m_seen or score[k] < m_score):
+            m_score = score[k]; m_idx = k; m_seen = True
     return m_idx
 
 

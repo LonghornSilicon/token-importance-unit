@@ -49,7 +49,7 @@ combinational tier read:
 **Latency:** LOAD and ACC complete in 1 cycle from idle; EVICT takes
 `N_SLOTS + 1` cycles (the serialized argmin scan + result). TIER is combinational.
 **Throughput:** one LOAD/ACC op per cycle; one eviction per `N_SLOTS + 1` cycles.
-**Footprint:** 95 flip-flops at `N_SLOTS = 8`; 13 833 µm² die, ~0.58 µW at
+**Footprint:** 96 flip-flops at `N_SLOTS = 8`; 13 833 µm² die, ~0.58 µW at
 SkyWater Sky130A (`N_SLOTS = 4` physical proxy; see §6 and `docs/sky130_signoff.md`).
 **Bit-exact reference:** `sw/reference_model/tiu_ref.py` (40/40 RTL replay
 evictions match).
@@ -190,12 +190,12 @@ the testbench verifies bit-exact). The Sky130 physical run synthesizes an
 `N_SLOTS = 4` proxy via `SYNTH_PARAMETERS` — exactly as the KV Cache Engine ships
 a `VECTOR_DIM = 8` proxy — to shrink the argmin-mux fanout and clock tree so the
 clock-root fanout clears the flow's limit; the datapath is parameter-identical.
-FF count: **95 @ N_SLOTS=8** (real), **53 @ N_SLOTS=4** (proxy). Real `N_SLOTS`
+FF count: **96 @ N_SLOTS=8** (real), **56 @ N_SLOTS=4** (proxy). Real `N_SLOTS`
 is set per-instantiation.
 
 The FF count tracks the closed form
-`N_SLOTS·(SCORE_WIDTH+1) + SCORE_WIDTH + 3·SLOT_WIDTH + 3` (92 @ N_SLOTS=8;
-yosys keeps ~+3 slot-index FFs un-merged → 95 synthesized, the value the CI gate
+`N_SLOTS·(SCORE_WIDTH+1) + SCORE_WIDTH + 3·SLOT_WIDTH + 4` (93 @ N_SLOTS=8;
+yosys keeps ~+3 slot-index FFs un-merged → 96 synthesized, the value the CI gate
 pins).
 
 ---

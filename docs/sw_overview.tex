@@ -149,7 +149,7 @@ target the TIU before silicon or an FPGA prototype exists.
 rtl/
 +-- token_importance_unit.sv          (the DUT)
 +-- tb/
-    +-- tb_token_importance_unit.sv   (directed, 29/29)
+    +-- tb_token_importance_unit.sv   (directed, 30/30)
     +-- tb_realdata.sv                (real-Qwen2 replay, 40/40)
     +-- testvectors/tiu_trace.hex     (committed golden trace)
 
@@ -176,7 +176,7 @@ docs/
 
 \begin{lstlisting}[basicstyle=\ttfamily\small]
 # RTL simulation (icarus verilog)
-cd rtl && make sim            # directed TB:  29/29 pass
+cd rtl && make sim            # directed TB:  30/30 pass
 cd rtl && make sim_realdata   # replay TB:    40/40 evictions bit-exact
 
 # Reference model (Python 3.10+, no dependencies)
@@ -266,7 +266,7 @@ Phase & Timeline & Compiler targets & We provide \\
 \toprule
 Surface & Test & Status \\
 \midrule
-RTL directed        & \path{tb_token_importance_unit.sv}         & 29/29 pass \\
+RTL directed        & \path{tb_token_importance_unit.sv}         & 30/30 pass \\
 RTL real-data replay & \path{tb_realdata.sv} (Qwen2 trace)       & 40/40 evictions \\
 Python reference     & self-test (directed cases)                & pass \\
 Python$\leftrightarrow$RTL parity & golden-trace replay          & 40/40 evictions \\

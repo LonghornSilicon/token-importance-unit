@@ -1,8 +1,9 @@
 // tb_token_importance_unit.sv — directed + randomized self-checking testbench.
 //
 // Maintains a shadow (score,valid) model that mirrors the DUT's exact eviction
-// semantics (serialized argmin, strict-less, seeded at slot 0) and checks every
-// EVICT victim plus saturation and free-on-evict behaviour.
+// semantics (serialized argmin seeded at slot 0; a valid slot always beats a min
+// that never came from a valid slot, then strict-less) and checks every EVICT
+// victim plus saturation and free-on-evict behaviour.
 `timescale 1ns/1ps
 
 module tb_token_importance_unit;
@@ -67,15 +68,17 @@ module tb_token_importance_unit;
         end
     endtask
 
-    // expected victim: mirror DUT exactly (seed slot 0, strict-less scan 0..N-1)
+    // expected victim: mirror DUT exactly (seed slot 0; a valid slot always
+    // beats a min that never came from a valid slot, then strict-less scan)
     function integer expected_victim;
-        integer em_score, em_idx, j;
+        integer em_score, em_idx, em_seen, j;
         begin
             em_score = sh_valid[0] ? sh_score[0] : SCORE_MAX;
             em_idx = 0;
+            em_seen = sh_valid[0];
             for (j=0;j<N_SLOTS;j=j+1)
-                if (sh_valid[j] && sh_score[j] < em_score) begin
-                    em_score = sh_score[j]; em_idx = j;
+                if (sh_valid[j] && (!em_seen || sh_score[j] < em_score)) begin
+                    em_score = sh_score[j]; em_idx = j; em_seen = 1;
                 end
             expected_victim = em_idx;
         end
@@ -117,9 +120,10 @@ module tb_token_importance_unit;
             $display("  saturation OK: score[0] = 0x%0h", dut.score[0]); end
         else $display("  MISMATCH saturation: score[0]=0x%0h", dut.score[0]);
 
-        // Reload the freed slots and evict again
+        // Reload the freed slots and evict again (slot3 gets mass 20 so the
+        // minimum is unambiguous, matching the tiu_ref.py self-test)
         do_load(1); do_load(3);
-        do_acc(1, 5);
+        do_acc(1, 5); do_acc(3, 20);
         do_evict();  // slot1 has mass 5, the new min
 
         // Tier handshake: set a threshold, check tier_keep matches valid && score>=thr
@@ -133,6 +137,15 @@ module tb_token_importance_unit;
                           i, tier_keep[i], (sh_valid[i] && (sh_score[i]>=tier_threshold)),
                           sh_valid[i], sh_score[i], tier_threshold);
         end
+
+        // Regression: slot 0 empty while every valid slot is saturated at
+        // SCORE_MAX. The argmin must return a valid slot — with the old seeded
+        // sentinel (no min_seen), no saturated slot could beat the SCORE_MAX
+        // seed and EVICT returned the empty slot 0.
+        do_reset();
+        do_load(2); do_load(5);
+        do_acc(2, 8'hFF); do_acc(5, 8'hFF);
+        do_evict();  // must be slot2 (first valid), not empty slot 0
 
         // Randomized soak
         for (r=0;r<200;r=r+1) begin

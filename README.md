@@ -6,7 +6,7 @@ tape-out. It decides, per cached token, whether to **keep, demote, or evict** it
 KV entry — so the KV cache stays within a fixed on-die budget as context grows.
 
 > **Status: built and signed off.** The retention algorithm (H2O accumulated-mass)
-> is validated on real Qwen2 traces (below); the RTL is verified (29/29 directed,
+> is validated on real Qwen2 traces (below); the RTL is verified (30/30 directed,
 > 40/40 real-data replay) and signs off on Sky130 with **0 violations**; a
 > bit-accurate Python reference model is at parity (40/40 evictions), and the
 > compiler-facing ISA spec, reference model, and paper section are in `docs/isa/`,
@@ -26,7 +26,7 @@ KV entry — so the KV cache stays within a fixed on-die budget as context grows
 | **Signal** | Post-softmax attention mass (the ACU sparsity study proved pre-softmax proxies fail at r≈0, post-softmax works at r≈0.99) |
 | **Integration** | Emits the **tier signal** that the KV Cache Engine already consumes (keep → CQ-8, demote → CQ-4, evict → drop) — mixed-precision retention |
 | **Verified (algorithm)** | HellaSwag acc_norm within **−0.006** of full cache down to **25% KV budget** on Qwen2-0.5B (n=500) |
-| **Status** | Built & signed off — RTL verified (29/29 directed, 40/40 real-data replay), **0-violation Sky130**, bit-exact Python reference at parity, ISA spec + paper shipped |
+| **Status** | Built & signed off — RTL verified (30/30 directed, 40/40 real-data replay), **0-violation Sky130**, bit-exact Python reference at parity, ISA spec + paper shipped |
 
 ---
 
@@ -162,7 +162,7 @@ token-importance-unit/
 ├── analysis/          # Python: H2O algorithm study, trace capture, test-vector gen
 │   ├── h2o_analysis.py                 # accuracy vs KV-budget sweep (this is the result above)
 │   └── h2o_qwen05b_n500.json           # measured curve
-├── rtl/               # SystemVerilog DUT + testbenches (29/29 + 40/40) + golden trace
+├── rtl/               # SystemVerilog DUT + testbenches (30/30 + 40/40) + golden trace
 ├── openlane/          # LibreLane Sky130 sign-off (0 violations)
 ├── sw/reference_model/# bit-accurate Python model, parity test, compiler entry point
 ├── paper/             # block write-up (token_importance_unit.pdf)
@@ -175,8 +175,8 @@ token-importance-unit/
 - [x] Gold config chosen (recent-ratio 0.5, 25% budget)
 - [x] All-3-blocks integration verified (TIU+KVCE+APA compose within ~3% of FP16)
 - [x] Deep analysis: long-ctx knee, per-head vs shared (keep per-head), accumulator width (10b)
-- [x] RTL: distributed-accumulator + serialized-argmin eviction datapath, closed-form FF count (95 FFs)
-- [x] Directed + randomized self-checking testbench (iverilog), 29/29 bit-exact
+- [x] RTL: distributed-accumulator + serialized-argmin eviction datapath, closed-form FF count 93 (96 synthesized)
+- [x] Directed + randomized self-checking testbench (iverilog), 30/30 bit-exact
 - [x] **Sky130 sign-off: 0 violations** across all checks (DRC/LVS/antenna/setup/hold/slew/cap/fanout) — `docs/sky130_signoff.md`
 - [x] Replay testbench from real Qwen2 attention traces (`sim_realdata`, 40/40 evictions bit-exact)
 - [x] TIU→KVCE tier-signal handshake (`tier_keep`), verified with APA in the loop (`docs/tier_handshake.md`)

@@ -55,9 +55,11 @@ Pure integer arithmetic, matching the RTL bit-for-bit:
   — a distributed per-slot saturating adder (the RTL owns one adder per slot,
   no shared broadcast net; see the Sky130 sign-off notes).
 - **EVICT**: serialized argmin seeded at slot 0
-  (`min := score[0]` if `valid[0]` else `SCORE_MAX`), then a strict-less scan
-  over slots `0..N−1`. Ties resolve to the lowest slot index; the victim's valid
-  bit is cleared on return.
+  (`min := score[0]` if `valid[0]` else `SCORE_MAX`), then a scan over slots
+  `0..N−1` in which a valid slot always beats a min that never came from a
+  valid slot, and otherwise a strict-less compare applies — so a valid slot
+  saturated at `SCORE_MAX` still beats an invalid seed. Ties resolve to the
+  lowest slot index; the victim's valid bit is cleared on return.
 - **TIER**: `tier_keep[k] = valid[k] and (score[k] >= threshold)` — N parallel
   comparators, combinational.
 

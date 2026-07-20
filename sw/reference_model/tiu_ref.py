@@ -15,11 +15,13 @@ The RTL core implements exactly three operations plus one combinational read:
   TIER  (thr)   -> keep : tier_keep[k] = valid[k] & score[k] >= thr (per-slot compare)
 
 The eviction argmin mirrors the RTL bit-for-bit: the running minimum is *seeded*
-with slot 0 (its score if valid, else the SCORE_MAX sentinel), then a
-strict-less scan runs over slots 0..N_SLOTS-1. Ties therefore resolve to the
-lowest slot index, and slot 0 wins a tie against itself. LOAD has priority over
-ACC when both target the same slot in the same cycle (matched here by applying
-LOAD before ACC if a caller issues both).
+with slot 0 (its score if valid, else the SCORE_MAX sentinel), then a scan runs
+over slots 0..N_SLOTS-1 in which a valid slot always beats a min that never came
+from a valid slot, and otherwise a strict-less compare applies. Ties therefore
+resolve to the lowest slot index, and slot 0 wins a tie against itself. LOAD has
+priority over ACC when both target the same slot in the same cycle: the RTL
+discards the ACC entirely (the slot ends at score 0), so a caller replaying a
+merged LOAD+ACC cycle must drop the ACC, not apply it after the LOAD.
 
 H2O bookkeeping (the recent-window protection and the KV-budget accounting) is
 NOT in this core: it is a thin control-layer wrapper that decides *when* to issue
@@ -143,8 +145,9 @@ class TokenImportanceUnit:
         """EVICT: return the minimum-mass valid slot and free it.
 
         Mirrors the RTL serialized argmin exactly: seed the running min with
-        slot 0 (its score if valid, else the SCORE_MAX sentinel), then a
-        strict-less scan over slots 0..N-1. The chosen victim's valid bit is
+        slot 0 (its score if valid, else the SCORE_MAX sentinel), then scan
+        slots 0..N-1 — a valid slot always beats a min that never came from a
+        valid slot, otherwise strict-less. The chosen victim's valid bit is
         cleared before returning (the RTL frees it in S_DONE). Ties resolve to
         the lowest slot index.
         """
@@ -198,20 +201,24 @@ class TokenImportanceUnit:
     @staticmethod
     def argmin_victim(score: Sequence[int], valid: Sequence[bool],
                       n_slots: int, score_max: Optional[int] = None) -> int:
-        """Serialized-argmin victim, seeded at slot 0 with a strict-less scan.
+        """Serialized-argmin victim over the valid slots, seeded at slot 0.
 
         Bit-exact with the RTL S_SCAN loop and with the shadow model in the
-        SystemVerilog testbenches. If no slot is valid, returns 0 (the seed),
-        matching the RTL sentinel behavior.
+        SystemVerilog testbenches: the scan tracks whether the running min came
+        from a valid slot, so a valid slot always beats the invalid seed — even
+        when every valid slot is saturated at SCORE_MAX. If no slot is valid,
+        returns 0 (the seed), matching the RTL.
         """
         if score_max is None:
             score_max = max(score) if score else 0
         m_score = score[0] if valid[0] else score_max
         m_idx = 0
+        m_seen = bool(valid[0])
         for k in range(n_slots):
-            if valid[k] and score[k] < m_score:
+            if valid[k] and (not m_seen or score[k] < m_score):
                 m_score = score[k]
                 m_idx = k
+                m_seen = True
         return m_idx
 
     # ------------------------------------------------------------------
@@ -265,16 +272,26 @@ def _self_test() -> None:
     v = tiu.evict()
     assert v == 1, f"expected victim 1 (mass 5), got {v}"
 
-    # Tier handshake: threshold 40, keep = valid & score >= 40.
+    # Tier handshake: threshold 40 against the hand-computed state
+    # {0: 255 keep, 1: evicted, 2: 250 keep, 3: 20 demote, 4..7: empty}.
     keep = tiu.tier(40)
-    for k in range(info.n_slots):
-        exp = tiu.valid[k] and (tiu.score[k] >= 40)
-        assert keep[k] == exp, f"tier[{k}] = {keep[k]}, expected {exp}"
+    assert keep == [True, False, True, False] + [False] * (info.n_slots - 4), \
+        f"tier(40) = {keep}"
 
     # Empty-cache eviction returns the seed slot 0.
     empty = TokenImportanceUnit(info)
     assert empty.argmin_victim(empty.score, empty.valid, info.n_slots,
                                info.score_max) == 0
+
+    # Saturated-cache regression: slot 0 empty while every valid slot sits at
+    # SCORE_MAX -- the argmin must return a valid slot, not the empty seed 0.
+    sat = TokenImportanceUnit(info)
+    sat.load(2)
+    sat.load(5)
+    sat.acc(2, info.score_max)
+    sat.acc(5, info.score_max)
+    v = sat.evict()
+    assert v == 2, f"expected victim 2 (first valid, saturated), got {v}"
 
     print("tiu_ref self-test: ALL CHECKS PASSED")
 

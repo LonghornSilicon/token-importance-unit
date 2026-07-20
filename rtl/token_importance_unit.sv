@@ -24,12 +24,13 @@
 //   scan_idx       : SLOT_WIDTH
 //   min_score      : SCORE_WIDTH
 //   min_idx        : SLOT_WIDTH
+//   min_seen       : 1
 //   evict_valid    : 1
 //   evict_slot     : SLOT_WIDTH
-//   Total: N_SLOTS*(SCORE_WIDTH+1) + SCORE_WIDTH + 3*SLOT_WIDTH + 3
+//   Total: N_SLOTS*(SCORE_WIDTH+1) + SCORE_WIDTH + 3*SLOT_WIDTH + 4
 //
 // For N_SLOTS = 8, SCORE_WIDTH = 8, SLOT_WIDTH = 3:
-//   8*9 + 8 + 3*3 + 3 = 72 + 8 + 9 + 3 = 92 FFs (register-count derivation)
+//   8*9 + 8 + 3*3 + 4 = 72 + 8 + 9 + 4 = 93 FFs (register-count derivation)
 //
 // SCORE_WIDTH = 8 is set from the accumulator-bit-width study
 // (docs/findings/h2o-deep-analysis.md): 8 bits is loss-free for the eviction
@@ -91,6 +92,7 @@ module token_importance_unit #(
     reg [SLOT_WIDTH-1:0]  scan_idx;
     reg [SCORE_WIDTH-1:0] min_score;
     reg [SLOT_WIDTH-1:0]  min_idx;
+    reg                   min_seen;   // running min came from a valid slot
 
     assign busy = (state != S_IDLE);
 
@@ -151,16 +153,22 @@ module token_importance_unit #(
                     if (evict_req) begin
                         state     <= S_SCAN;
                         scan_idx  <= {SLOT_WIDTH{1'b0}};
-                        // seed min with slot 0 if valid, else max sentinel
+                        // seed min with slot 0 if valid, else max sentinel;
+                        // min_seen tracks whether the min came from a VALID slot,
+                        // so a valid slot saturated at SCORE_MAX still beats an
+                        // invalid seed (without it, EVICT could return empty slot 0)
                         min_score <= valid[0] ? score[0] : SCORE_MAX;
                         min_idx   <= {SLOT_WIDTH{1'b0}};
+                        min_seen  <= valid[0];
                     end
                 end
                 S_SCAN: begin
-                    // compare slot scan_idx, then advance
-                    if (valid[scan_idx] && (score[scan_idx] < min_score)) begin
+                    // compare slot scan_idx, then advance; a valid slot always
+                    // beats a running min that never came from a valid slot
+                    if (valid[scan_idx] && (!min_seen || (score[scan_idx] < min_score))) begin
                         min_score <= score[scan_idx];
                         min_idx   <= scan_idx;
+                        min_seen  <= 1'b1;
                     end
                     if (scan_idx == LAST_IDX) begin
                         state <= S_DONE;

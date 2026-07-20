@@ -156,7 +156,7 @@ from idle; \texttt{EVICT} takes $\texttt{N\_SLOTS}+1$ cycles (the serialized
 argmin scan plus the result). \texttt{TIER} is combinational.\\
 \textbf{Throughput:} one \texttt{LOAD}/\texttt{ACC} per cycle; one eviction per
 $\texttt{N\_SLOTS}+1$ cycles.\\
-\textbf{Footprint:} 95 flip-flops at $\texttt{N\_SLOTS}=8$; $13\,833~\mu$m$^2$
+\textbf{Footprint:} 96 flip-flops at $\texttt{N\_SLOTS}=8$; $13\,833~\mu$m$^2$
 die, $\sim$0.58\,\textmu W at SkyWater Sky130A ($\texttt{N\_SLOTS}=4$ physical
 proxy; see \S\ref{sec:syntime} and \path{docs/sky130_signoff.md}).\\
 \textbf{Bit-exact reference:} \path{sw/reference_model/tiu_ref.py} (40/40 RTL
@@ -398,13 +398,13 @@ physical run synthesizes an \texttt{N\_SLOTS} $=4$ proxy via
 \texttt{SYNTH\_PARAMETERS} --- exactly as the KV Cache Engine ships a
 \texttt{VECTOR\_DIM} $=8$ proxy --- to shrink the argmin-mux fanout and clock
 tree so the clock-root fanout clears the flow's limit; the datapath is
-parameter-identical. FF count: \textbf{95 @ N\_SLOTS=8} (real),
-\textbf{53 @ N\_SLOTS=4} (proxy). Real \texttt{N\_SLOTS} is set
+parameter-identical. FF count: \textbf{96 @ N\_SLOTS=8} (real),
+\textbf{56 @ N\_SLOTS=4} (proxy). Real \texttt{N\_SLOTS} is set
 per-instantiation. The count tracks the closed form
 \[
-  \mathrm{FFs} = \texttt{N\_SLOTS}\cdot(\texttt{SCORE\_WIDTH}{+}1) + \texttt{SCORE\_WIDTH} + 3\cdot\texttt{SLOT\_WIDTH} + 3
+  \mathrm{FFs} = \texttt{N\_SLOTS}\cdot(\texttt{SCORE\_WIDTH}{+}1) + \texttt{SCORE\_WIDTH} + 3\cdot\texttt{SLOT\_WIDTH} + 4
 \]
-(92 @ N\_SLOTS=8; yosys keeps $\sim{+}3$ slot-index FFs un-merged $\to$ 95
+(93 @ N\_SLOTS=8; yosys keeps $\sim{+}3$ slot-index FFs un-merged $\to$ 96
 synthesized, the value the CI gate pins).
 
 %==============================================================================

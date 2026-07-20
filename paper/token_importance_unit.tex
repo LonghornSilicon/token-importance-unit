@@ -84,7 +84,7 @@ split is near-lossless (+1.0\% perplexity), and an 8-bit fixed-point accumulator
 is loss-free for the eviction ranking ($\Delta$ $-0.002$ HellaSwag acc\_norm). We
 then carry the policy to silicon. The RTL core is deliberately minimal ---
 distributed per-slot saturating accumulators, a serialized-argmin victim scan, and
-a per-slot keep/demote tier comparator --- and passes 29/29 directed self-checking
+a per-slot keep/demote tier comparator --- and passes 30/30 directed self-checking
 tests and 40/40 eviction checks replayed from real Qwen2 attention traces,
 bit-exactly matched by a Python reference model. Through the LibreLane/OpenROAD
 open flow on SkyWater Sky130A the design signs off with \emph{zero} violations of
@@ -125,7 +125,7 @@ bit-exact reference, and sign it off end-to-end through an open ASIC flow.
     fixed-point accumulator width (8 bits, loss-free).
   \item A minimal eviction-core RTL --- distributed saturating accumulators, a
     serialized-argmin victim scan, and a per-slot tier comparator --- with a
-    closed-form flip-flop count, verified 29/29 directed and 40/40 on real Qwen2
+    closed-form flip-flop count, verified 30/30 directed and 40/40 on real Qwen2
     replay traces, and a bit-exact Python reference model.
   \item A zero-violation Sky130 sign-off and a 16FFC projection.
   \item A three-block integration measurement (TIU $+$ KV Cache Engine $+$
@@ -268,9 +268,9 @@ broadcast weight, avoiding a shared adder-result net fanning out to
 ever read), which keeps \texttt{rst\_n} fanout at $\sim$11 instead of $\sim$113.
 The flip-flop count is closed-form,
 \[
-  \mathrm{FFs}=\texttt{N\_SLOTS}\cdot(\texttt{SCORE\_WIDTH}{+}1)+\texttt{SCORE\_WIDTH}+3\,\texttt{SLOT\_WIDTH}+3,
+  \mathrm{FFs}=\texttt{N\_SLOTS}\cdot(\texttt{SCORE\_WIDTH}{+}1)+\texttt{SCORE\_WIDTH}+3\,\texttt{SLOT\_WIDTH}+4,
 \]
-92 at $\texttt{N\_SLOTS}{=}8$ (95 synthesized; yosys leaves $\sim$3 slot-index FFs
+93 at $\texttt{N\_SLOTS}{=}8$ (96 synthesized; yosys leaves $\sim$3 slot-index FFs
 un-merged, the value the CI gate pins).
 
 The \emph{H2O recent-window and budget bookkeeping is a control-layer wrapper},
@@ -281,12 +281,12 @@ block~1 shipped just the ratio gate.
 \subsection{Functional verification}
 
 Two self-checking testbenches drive the same DUT, each maintaining a shadow model
-of the exact eviction semantics (serialized argmin, strict-less scan seeded at
-slot~0):
+of the exact eviction semantics (serialized argmin seeded at slot~0; a valid slot always beats a min
+that never came from a valid slot, then strict-less):
 \begin{itemize}
   \item \textbf{Directed TB} (\path{tb_token_importance_unit.sv}): directed cases
     (distinct masses, tie-breaking, saturation past \texttt{SCORE\_MAX}, tier
-    thresholding, free-on-evict) plus a 200-op randomized soak. Result: 29/29 pass.
+    thresholding, free-on-evict) plus a 200-op randomized soak. Result: 30/30 pass.
   \item \textbf{Replay TB} (\path{tb_realdata.sv}): 444 LOAD/ACC/EVICT ops
     generated from a real Qwen2-0.5B forward pass by
     \path{analysis/gen_tiu_testvectors.py} (48 tokens streamed through 8 slots,
@@ -349,7 +349,7 @@ bit-exact). The physical run synthesizes an $\texttt{N\_SLOTS}=4$ proxy via
 \texttt{SYNTH\_PARAMETERS} --- exactly as the KV Cache Engine ships a
 $\texttt{VECTOR\_DIM}=8$ proxy --- to shrink the argmin-mux fanout and clock tree
 so the clock-root fanout clears the flow's limit, with the datapath
-parameter-identical. Flip-flop count: 95 at $\texttt{N\_SLOTS}{=}8$ (real), 53 at
+parameter-identical. Flip-flop count: 96 at $\texttt{N\_SLOTS}{=}8$ (real), 56 at
 $\texttt{N\_SLOTS}{=}4$ (proxy).
 
 \paragraph{16FFC projection.}
@@ -412,7 +412,7 @@ The Token Importance Unit carries the H2O heavy-hitter policy from algorithm to
 signed-off silicon. On Qwen2 a 25\% KV budget with a 50/50 recency split is
 near-lossless (+1.0\% long-context perplexity) and an 8-bit accumulator is
 loss-free. The eviction core --- distributed saturating accumulators, a
-serialized-argmin victim scan, and a per-slot tier comparator --- passes 29/29
+serialized-argmin victim scan, and a per-slot tier comparator --- passes 30/30
 directed and 40/40 real-Qwen2 replay checks, is bit-exactly reproduced by a Python
 reference model, and signs off through the LibreLane/OpenROAD open flow on Sky130
 with zero violations in a $13{,}833~\mu$m$^2$ die at $\sim$0.58\,\textmu W,
