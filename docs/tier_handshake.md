@@ -30,7 +30,9 @@ Per cached token `t` occupying slot `s`:
    - `tier_keep[s] = 0` (demote)       → store the **value at CQ-4** (per-token INT4).
 
 > **RETIRED under CQ-3-rot (branch, 2026-07-20).** The WHT-rotated INT3 value tier
-> (`kv-cache-engine` `docs/wht_value_rotation.md`, idea: Abhiram Bandi + Chaithu Talasila)
+> (`kv-cache-engine` `docs/wht_value_rotation.md`; the Walsh–Hadamard value rotation itself
+> originates in TurboQuant+ / [`themoddedcube/turboquant-plus`](https://github.com/themoddedcube/turboquant-plus),
+> by Chaithu Talasila — the flat-INT3 CQ-3-rot application is the joint idea of Abhiram Bandi + Chaithu Talasila)
 > makes **all** values a flat, uniform 3 bits — better than the CQ-8/CQ-4 ladder at less
 > memory and no calibration. There is no per-token value bit-width left to select, so the
 > **value-precision role of `tier_keep` is retired**: the TIU keeps only its **evict-or-keep**
