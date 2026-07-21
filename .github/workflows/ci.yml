@@ -1,0 +1,26 @@
+name: CI (main — docs / analysis / reference)
+
+# main carries docs / analysis / reference-source only. RTL (the 130nm Sky130
+# proxy) lives on the `rtl` branch, and the Qwen accuracy gate runs there too
+# (accuracy is a codec/RTL property; main commits don't move it). So main runs
+# no RTL gates and no Qwen gate — it is intentionally docs-minimal.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  block-ci:
+    uses: LonghornSilicon/.github/.github/workflows/block-ci.yml@main
+    with:
+      block-name: token_importance_unit
+      expected-ff-count: 95          # required input; unused when has-rtl:false
+      has-rtl: false                 # RTL lives on the 'rtl' branch
+      has-reference-model: false
+      has-paper: false
+      has-coverage-gate: false
+      has-formal-equivalence: false
+      has-qwen-test: false           # Qwen accuracy gate runs on the rtl branch
